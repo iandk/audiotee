@@ -152,6 +152,22 @@ public class AudioFormatConverter {
     // across chunks (avoiding discontinuity artifacts).
     var error: NSError?
 
+    // AVAudioConverter calls this block repeatedly until the output buffer is
+    // full, and we hand back the same input buffer every time. That looks like
+    // it must duplicate audio, and with a larger output buffer it does:
+    // measured 2026-09-02, an uncapped buffer produced 4800 frames instead of
+    // 1600, with 9 discontinuities in a monotonic input ramp.
+    //
+    // It is safe here only because getBuffers() sizes the output buffer to
+    // exactly inputFrames * (target / source), so the capacity truncates the
+    // duplicate passes at precisely the right frame. That coupling is the whole
+    // safety argument — AudioFormatConverterTests asserts it. Do not change the
+    // capacity calculation without re-running those tests.
+    //
+    // The obvious alternative, serving the buffer once and then reporting
+    // .noDataNow, was implemented and reverted: it leaves the resampler's
+    // filter unprimed and drops the first 240 frames (15 ms) of every stream,
+    // paying real audio to prevent a bug this API cannot reach.
     let status = avConverter.convert(to: outputBuffer, error: &error) {
       requestedPackets, outStatus in
       outStatus.pointee = .haveData
